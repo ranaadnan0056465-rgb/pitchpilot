@@ -40,8 +40,14 @@ function config() {
   if (!apiKey || apiKey.trim().length < 10) {
     throw new HttpError(500, 'SERVER_MISCONFIGURED', 'Proposal generation is temporarily unavailable.');
   }
-  const origins = (process.env.ALLOWED_ORIGINS || '')
+  
+  // AGAR Netlify mein ALLOWED_ORIGINS set nahi hai, to sabko allow kar do (fix)
+  let origins = (process.env.ALLOWED_ORIGINS || '')
     .split(',').map(s => s.trim()).filter(Boolean);
+  if (origins.length === 0) {
+    origins = ['*']; 
+  }
+
   return {
     apiKey,
     origins,
@@ -67,7 +73,14 @@ function corsHeaders(event, cfg) {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
   };
-  if (origin && cfg.origins.includes(origin)) h['Access-Control-Allow-Origin'] = origin;
+  
+  // CORS Fix
+  if (cfg.origins.includes('*')) {
+    h['Access-Control-Allow-Origin'] = '*';
+  } else if (origin && cfg.origins.includes(origin)) {
+    h['Access-Control-Allow-Origin'] = origin;
+  }
+  
   return h;
 }
 
@@ -81,7 +94,6 @@ function rateLimit(event, cfg) {
     for (const [key, b] of buckets) if (b.resetAt <= now) buckets.delete(key);
     lastCleanup = now;
   }
-  // Netlify-provided direct client IP header; do not trust arbitrary forwarded chains.
   const ip = header(event, 'x-nf-client-connection-ip') ||
     event.requestContext?.identity?.sourceIp ||
     event.requestContext?.http?.sourceIp || 'unknown-client';
@@ -218,7 +230,9 @@ exports.handler = async (event) => {
   }
   const headers = corsHeaders(event, cfg);
   const origin = header(event, 'origin');
-  if (origin && !cfg.origins.includes(origin)) {
+  
+  // CORS Check bypass (agar '*' allow hai to block nahi karega)
+  if (origin && !cfg.origins.includes('*') && !cfg.origins.includes(origin)) {
     return response(403, { error: { code: 'ORIGIN_NOT_ALLOWED', message: 'This origin is not allowed to access PitchPilot.' } }, headers);
   }
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers, body: '' };
